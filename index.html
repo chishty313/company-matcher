@@ -4,99 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Company Matcher</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        .container {
-            background: #f5f5f5;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .input-group {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        .input-field {
-            display: flex;
-            flex-direction: column;
-        }
-        input {
-            padding: 8px;
-            margin-top: 5px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        button {
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            width: 100%;
-        }
-        button:hover {
-            background: #0056b3;
-        }
-        .results {
-            margin-top: 20px;
-            display: none;
-        }
-        .similarity-score {
-            background: #e3f2fd;
-            padding: 15px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-        }
-        .urls-container {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
-        .url-list {
-            background: white;
-            padding: 15px;
-            border-radius: 4px;
-        }
-        .url-list h3 {
-            margin-top: 0;
-        }
-        .url-list a {
-            color: #007bff;
-            text-decoration: none;
-            display: block;
-            margin-bottom: 8px;
-            word-break: break-all;
-        }
-        .url-list a:hover {
-            text-decoration: underline;
-        }
-        .loading {
-            display: none;
-            text-align: center;
-            margin: 20px 0;
-        }
-        .url-status {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-        .url-status.valid {
-            background-color: #28a745;
-        }
-        .url-status.invalid {
-            background-color: #dc3545;
-        }
-    </style>
+    <link rel="stylesheet" href="styles/main.css">
 </head>
 <body>
     <div class="container">
@@ -113,7 +21,7 @@
             </div>
         </div>
         
-        <button onclick="analyzeSimilarity()">Analyze Similarity</button>
+        <button onclick="CompanyMatcher.analyzeSimilarity()">Analyze Similarity</button>
         
         <div id="loading" class="loading">Analyzing companies...</div>
         
@@ -137,139 +45,11 @@
         </div>
     </div>
 
-    <script>
-        function calculateSimilarity(str1, str2) {
-            const s1 = str1.toLowerCase();
-            const s2 = str2.toLowerCase();
-            
-            // Enhanced normalization
-            const normalizeCompanyName = (str) => {
-                return str
-                    .replace(/\b(technologies|technology)\b/gi, 'tech')
-                    .replace(/\b(incorporated|corporation|inc|corp|llc|ltd|company)\b/gi, '')
-                    .replace(/[^\w\s]/g, '')
-                    .replace(/\s+/g, ' ')
-                    .trim();
-            };
-            
-            const clean1 = normalizeCompanyName(s1);
-            const clean2 = normalizeCompanyName(s2);
-            
-            // Levenshtein distance calculation
-            const levenshteinDistance = (a, b) => {
-                const matrix = Array(b.length + 1).fill().map(() => Array(a.length + 1).fill(0));
-                
-                for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
-                for (let j = 0; j <= b.length; j++) matrix[j][0] = j;
-                
-                for (let j = 1; j <= b.length; j++) {
-                    for (let i = 1; i <= a.length; i++) {
-                        const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
-                        matrix[j][i] = Math.min(
-                            matrix[j][i - 1] + 1,
-                            matrix[j - 1][i] + 1,
-                            matrix[j - 1][i - 1] + substitutionCost
-                        );
-                    }
-                }
-                
-                return 1 - (matrix[b.length][a.length] / Math.max(a.length, b.length));
-            };
-            
-            const similarity = levenshteinDistance(clean1, clean2) * 100;
-            return similarity.toFixed(2);
-        }
-
-        async function checkUrl(url) {
-            try {
-                const response = await fetch(url, { method: 'HEAD', mode: 'no-cors' });
-                return response.ok;
-            } catch (error) {
-                return false;
-            }
-        }
-
-        async function generateUrls(companyName) {
-            const cleanName = companyName.toLowerCase()
-                .replace(/[^\w\s-]/g, '')
-                .replace(/\s+/g, '-');
-            
-            const urlTemplates = [
-                { prefix: 'https://www.', suffix: ['.com', '.co', '.io', '.net'] },
-                { prefix: 'https://www.linkedin.com/company/', suffix: [''] },
-                { prefix: 'https://twitter.com/', suffix: [''] },
-                { prefix: 'https://www.crunchbase.com/organization/', suffix: [''] },
-                { prefix: 'https://github.com/', suffix: [''] }
-            ];
-
-            const urls = [];
-            
-            for (const template of urlTemplates) {
-                for (const suffix of template.suffix) {
-                    const url = `${template.prefix}${cleanName}${suffix}`;
-                    const isValid = await checkUrl(url);
-                    urls.push({ url, isValid });
-                }
-            }
-            
-            return urls;
-        }
-
-        async function analyzeSimilarity() {
-            const ziCompany = document.getElementById('ziCompany').value;
-            const sfCompany = document.getElementById('sfCompany').value;
-            
-            if (!ziCompany || !sfCompany) {
-                alert('Please enter both company names');
-                return;
-            }
-
-            // Show loading state
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('results').style.display = 'none';
-
-            const similarity = calculateSimilarity(ziCompany, sfCompany);
-            
-            // Generate and validate URLs
-            const [ziUrls, sfUrls] = await Promise.all([
-                generateUrls(ziCompany),
-                generateUrls(sfCompany)
-            ]);
-
-            // Calculate domain similarity
-            const domainSimilarity = calculateSimilarity(
-                new URL(ziUrls[0].url).hostname,
-                new URL(sfUrls[0].url).hostname
-            );
-
-            // Update results
-            document.getElementById('nameSimilarity').textContent = 
-                `Company Name Similarity: ${similarity}%`;
-            document.getElementById('domainSimilarity').textContent = 
-                `Domain Similarity: ${domainSimilarity}%`;
-
-            // Update URLs with status indicators
-            const createUrlHtml = (urlObj) => {
-                const statusClass = urlObj.isValid ? 'valid' : 'invalid';
-                return `
-                    <div>
-                        <span class="url-status ${statusClass}"></span>
-                        <a href="${urlObj.url}" target="_blank">${urlObj.url}</a>
-                    </div>
-                `;
-            };
-
-            document.getElementById('ziUrls').innerHTML = ziUrls
-                .map(createUrlHtml)
-                .join('');
-            document.getElementById('sfUrls').innerHTML = sfUrls
-                .map(createUrlHtml)
-                .join('');
-
-            // Hide loading and show results
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('results').style.display = 'block';
-        }
-    </script>
+    <script src="js/utils/stringUtils.js"></script>
+    <script src="js/utils/urlUtils.js"></script>
+    <script src="js/services/similarityService.js"></script>
+    <script src="js/services/urlService.js"></script>
+    <script src="js/ui/uiManager.js"></script>
+    <script src="js/companyMatcher.js"></script>
 </body>
 </html>
