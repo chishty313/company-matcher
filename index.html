@@ -78,6 +78,24 @@
         .url-list a:hover {
             text-decoration: underline;
         }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .url-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .url-status.valid {
+            background-color: #28a745;
+        }
+        .url-status.invalid {
+            background-color: #dc3545;
+        }
     </style>
 </head>
 <body>
@@ -96,6 +114,8 @@
         </div>
         
         <button onclick="analyzeSimilarity()">Analyze Similarity</button>
+        
+        <div id="loading" class="loading">Analyzing companies...</div>
         
         <div id="results" class="results">
             <div class="similarity-score">
@@ -122,51 +142,80 @@
             const s1 = str1.toLowerCase();
             const s2 = str2.toLowerCase();
             
-            // Remove common company terms and special characters
-            const cleanStr = (str) => {
-                return str.replace(/\b(inc|corp|llc|ltd|company)\b/gi, '')
-                         .replace(/[^\w\s]/g, '')
-                         .trim();
+            // Enhanced normalization
+            const normalizeCompanyName = (str) => {
+                return str
+                    .replace(/\b(technologies|technology)\b/gi, 'tech')
+                    .replace(/\b(incorporated|corporation|inc|corp|llc|ltd|company)\b/gi, '')
+                    .replace(/[^\w\s]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
             };
             
-            const clean1 = cleanStr(s1);
-            const clean2 = cleanStr(s2);
+            const clean1 = normalizeCompanyName(s1);
+            const clean2 = normalizeCompanyName(s2);
             
-            // Simple similarity calculation
-            let matches = 0;
-            const longer = clean1.length > clean2.length ? clean1 : clean2;
-            const shorter = clean1.length > clean2.length ? clean2 : clean1;
+            // Levenshtein distance calculation
+            const levenshteinDistance = (a, b) => {
+                const matrix = Array(b.length + 1).fill().map(() => Array(a.length + 1).fill(0));
+                
+                for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
+                for (let j = 0; j <= b.length; j++) matrix[j][0] = j;
+                
+                for (let j = 1; j <= b.length; j++) {
+                    for (let i = 1; i <= a.length; i++) {
+                        const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+                        matrix[j][i] = Math.min(
+                            matrix[j][i - 1] + 1,
+                            matrix[j - 1][i] + 1,
+                            matrix[j - 1][i - 1] + substitutionCost
+                        );
+                    }
+                }
+                
+                return 1 - (matrix[b.length][a.length] / Math.max(a.length, b.length));
+            };
             
-            for (let i = 0; i < shorter.length; i++) {
-                if (shorter[i] === longer[i]) {
-                    matches++;
+            const similarity = levenshteinDistance(clean1, clean2) * 100;
+            return similarity.toFixed(2);
+        }
+
+        async function checkUrl(url) {
+            try {
+                const response = await fetch(url, { method: 'HEAD', mode: 'no-cors' });
+                return response.ok;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        async function generateUrls(companyName) {
+            const cleanName = companyName.toLowerCase()
+                .replace(/[^\w\s-]/g, '')
+                .replace(/\s+/g, '-');
+            
+            const urlTemplates = [
+                { prefix: 'https://www.', suffix: ['.com', '.co', '.io', '.net'] },
+                { prefix: 'https://www.linkedin.com/company/', suffix: [''] },
+                { prefix: 'https://twitter.com/', suffix: [''] },
+                { prefix: 'https://www.crunchbase.com/organization/', suffix: [''] },
+                { prefix: 'https://github.com/', suffix: [''] }
+            ];
+
+            const urls = [];
+            
+            for (const template of urlTemplates) {
+                for (const suffix of template.suffix) {
+                    const url = `${template.prefix}${cleanName}${suffix}`;
+                    const isValid = await checkUrl(url);
+                    urls.push({ url, isValid });
                 }
             }
             
-            return ((matches / longer.length) * 100).toFixed(2);
+            return urls;
         }
 
-        function extractDomain(url) {
-            try {
-                const domain = new URL(url).hostname;
-                return domain.replace('www.', '');
-            } catch {
-                return url;
-            }
-        }
-
-        function generateUrls(companyName) {
-            const cleanName = companyName.toLowerCase().replace(/\s+/g, '');
-            return [
-                `https://www.${cleanName}.com`,
-                `https://www.linkedin.com/company/${cleanName}`,
-                `https://twitter.com/${cleanName}`,
-                `https://www.crunchbase.com/organization/${cleanName}`,
-                `https://github.com/${cleanName}`
-            ];
-        }
-
-        function analyzeSimilarity() {
+        async function analyzeSimilarity() {
             const ziCompany = document.getElementById('ziCompany').value;
             const sfCompany = document.getElementById('sfCompany').value;
             
@@ -175,13 +224,22 @@
                 return;
             }
 
+            // Show loading state
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+
             const similarity = calculateSimilarity(ziCompany, sfCompany);
-            const ziUrls = generateUrls(ziCompany);
-            const sfUrls = generateUrls(sfCompany);
             
+            // Generate and validate URLs
+            const [ziUrls, sfUrls] = await Promise.all([
+                generateUrls(ziCompany),
+                generateUrls(sfCompany)
+            ]);
+
+            // Calculate domain similarity
             const domainSimilarity = calculateSimilarity(
-                extractDomain(ziUrls[0]),
-                extractDomain(sfUrls[0])
+                new URL(ziUrls[0].url).hostname,
+                new URL(sfUrls[0].url).hostname
             );
 
             // Update results
@@ -190,15 +248,26 @@
             document.getElementById('domainSimilarity').textContent = 
                 `Domain Similarity: ${domainSimilarity}%`;
 
-            // Update URLs
+            // Update URLs with status indicators
+            const createUrlHtml = (urlObj) => {
+                const statusClass = urlObj.isValid ? 'valid' : 'invalid';
+                return `
+                    <div>
+                        <span class="url-status ${statusClass}"></span>
+                        <a href="${urlObj.url}" target="_blank">${urlObj.url}</a>
+                    </div>
+                `;
+            };
+
             document.getElementById('ziUrls').innerHTML = ziUrls
-                .map(url => `<a href="${url}" target="_blank">${url}</a>`)
+                .map(createUrlHtml)
                 .join('');
             document.getElementById('sfUrls').innerHTML = sfUrls
-                .map(url => `<a href="${url}" target="_blank">${url}</a>`)
+                .map(createUrlHtml)
                 .join('');
 
-            // Show results
+            // Hide loading and show results
+            document.getElementById('loading').style.display = 'none';
             document.getElementById('results').style.display = 'block';
         }
     </script>
